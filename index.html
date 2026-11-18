@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0f0f1a">
+<title>Новостной блок</title>
+<style>
+:root{
+  --bg:#0f0f1a; --card:#1a1a2e; --card2:#22223a;
+  --accent:#4cc9f0; --accent2:#7209b7;
+  --text:#e8e8e8; --muted:#a0a0b0;
+  --border:#2a2a40;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  background:var(--bg);color:var(--text);min-height:100vh;
+  padding:12px 12px 90px;line-height:1.4;font-size:15px;
+}
+h1{font-size:1.15rem;color:var(--accent);text-align:center;margin:6px 0 12px}
+.card{background:var(--card);border-radius:14px;padding:14px;margin-bottom:12px;box-shadow:0 3px 14px rgba(0,0,0,.3)}
+h2{font-size:.95rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:0 0 10px}
+button{
+  border:none;border-radius:10px;padding:12px;font-weight:600;
+  background:var(--card2);color:var(--text);cursor:pointer;
+  transition:transform .1s,opacity .1s;font-family:inherit;font-size:1rem;
+}
+button:active{transform:scale(.98);opacity:.9}
+.btn-main{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;width:100%;margin-top:10px}
+.btn-small{padding:7px 10px;font-size:.85rem}
+.btn-stop{background:#5a1f1f;color:#ffb3b3;width:100%;margin-top:10px}
+.tabs{
+  position:fixed;bottom:0;left:0;right:0;display:flex;
+  background:var(--card);border-top:1px solid var(--border);z-index:1000;
+}
+.tabs button{
+  flex:1;border-radius:0;background:transparent;color:var(--muted);
+  padding:12px 4px;font-size:.78rem;font-weight:600;
+}
+.tabs button.active{color:var(--accent);border-top:3px solid var(--accent)}
+.tab-page{display:none}
+.tab-page.active{display:block}
+.item{background:var(--card2);border-radius:10px;padding:10px;margin-bottom:8px}
+.item-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.item-name{font-weight:600;font-size:.95rem}
+.item-source{font-size:.75rem;color:var(--muted);margin-top:2px}
+.item-desc{font-size:.85rem;color:var(--muted);margin-top:5px;line-height:1.45}
+.item-actions{display:flex;gap:6px;margin-top:8px}
+.empty{color:var(--muted);text-align:center;padding:16px 0;font-size:.9rem}
+.hint{font-size:.78rem;color:var(--muted);margin-top:6px;line-height:1.45}
+select{
+  width:100%;padding:11px 12px;border:2px solid var(--border);
+  border-radius:10px;background:#12121f;color:var(--text);outline:none;font-size:1rem;
+}
+.badge{display:inline-block;font-size:.7rem;padding:2px 6px;border-radius:5px;background:var(--border);color:var(--muted);margin-left:6px}
+.badge.ru{background:#2a2a5a;color:#aab8ff}
+.badge.ua{background:#4a3a1a;color:#ffd88a}
+.badge.world{background:#1e4d32;color:#8ff0b5}
+.status{font-size:.85rem;color:var(--muted);text-align:center;padding:6px 0}
+</style>
+</head>
+<body>
+
+<h1>📰 Новостной блок</h1>
+
+<div class="tab-page active" id="page-news">
+  <div class="card">
+    <h2>Настройки выпуска</h2>
+    <label style="font-size:.85rem;color:var(--muted);display:block;margin-bottom:4px">Длительность</label>
+    <select id="durationSelect">
+      <option value="5">5 минут (кратко)</option>
+      <option value="10" selected>10 минут (стандарт)</option>
+      <option value="15">15 минут (подробно)</option>
+    </select>
+    <button class="btn-main" onclick="loadAllNews()">Загрузить новости</button>
+    <button class="btn-main" onclick="startBroadcast()">▶ Озвучить выпуск</button>
+    <button class="btn-stop" onclick="stopBroadcast()" id="stopBtn" style="display:none">■ Остановить</button>
+    <div class="hint">
+      Блок «Украина»: сравнение источников (РФ / Украина / мир).<br>
+      Остальные темы — из доступных RSS. Озвучка через браузер.
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Украина (сравнение)</h2>
+    <div id="ukraineList"><div class="empty">Нажмите «Загрузить новости»</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Мир: политика, экономика, конфликты</h2>
+    <div id="worldList"><div class="empty">—</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Катаклизмы и катастрофы</h2>
+    <div id="disasterList"><div class="empty">—</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Спорт, космос, медицина, наука, технологии, культура</h2>
+    <div id="miscList"><div class="empty">—</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Эстония (политика и экономика)</h2>
+    <div id="estoniaList"><div class="empty">—</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Погода (Таллинн)</h2>
+    <div id="weatherList"><div class="empty">—</div></div>
+  </div>
+</div>
+
+<div class="tab-page" id="page-data">
+  <div class="card">
+    <h2>О приложении</h2>
+    <p class="hint">
+      Это PWA для чтения новостей с озвучкой. Данные не сохраняются — при каждом запуске новости загружаются заново.<br><br>
+      Источники (РФ): РИА Новости, ТАСС.<br>
+      Источники (Украина): Украинская правда, Укринформ.<br>
+      Источники (мир): BBC, Meduza, Reuters.<br>
+      Эстония: ERR, Postimees, Majandus24.<br><br>
+      Если озвучка не на русском — установите «Синтезатор речи Google» и скачайте русский язык в настройках Android.
+    </p>
+  </div>
+</div>
+
+<div class="tabs">
+  <button class="active" data-tab="news" onclick="switchTab('news')">Новости</button>
+  <button data-tab="data" onclick="switchTab('data')">Данные</button>
+</div>
+
+<script>
+/* ============================================================
+   КОНФИГУРАЦИЯ ИСТОЧНИКОВ
+   ============================================================ */
+const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
+
+const FEEDS = {
+  // Украина: сравнение
+  ukraine: [
+    { url: 'https://ria.ru/export/rss2/archive/index.xml', name: 'РИА Новости', side: 'ru' },
+    { url: 'https://tass.ru/rss/v2.xml', name: 'ТАСС', side: 'ru' },
+    { url: 'https://www.pravda.com.ua/rss/', name: 'Украинская правда', side: 'ua' },
+    { url: 'https://www.ukrinform.ru/rss/', name: 'Укринформ', side: 'ua' }
+  ],
+  // Мир: политика, экономика, конфликты
+  world: [
+    { url: 'https://feeds.bbci.co.uk/news/world/rss.xml', name: 'BBC World', side: 'world' },
+    { url: 'https://meduza.io/rss/all', name: 'Meduza', side: 'world' },
+    { url: 'https://www.reutersagency.com/feed/?best-topics=world&post_type=best', name: 'Reuters', side: 'world' }
+  ],
+  // Катаклизмы
+  disasters: [
+    { url: 'https://feeds.bbci.co.uk/news/world/rss.xml', name: 'BBC World', side: 'world' },
+    { url: 'https://meduza.io/rss/all', name: 'Meduza', side: 'world' }
+  ],
+  // Спорт и прочее
+  misc: [
+    { url: 'https://feeds.bbci.co.uk/news/rss.xml', name: 'BBC News', side: 'world' },
+    { url: 'https://meduza.io/rss/all', name: 'Meduza', side: 'world' }
+  ],
+  // Эстония
+  estonia: [
+    { url: 'https://www.err.ee/rss', name: 'ERR', side: 'ee' },
+    { url: 'https://www.postimees.ee/rss', name: 'Postimees', side: 'ee' },
+    { url: 'https://majandus24.postimees.ee/rss', name: 'Majandus24', side: 'ee' }
+  ],
+  // Погода
+  weather: [
+    { url: 'https://www.err.ee/rss', name: 'ERR', side: 'ee' }
+  ]
+};
+
+let allNews = { ukraine: [], world: [], disasters: [], misc: [], estonia: [], weather: [] };
+let isSpeaking = false;
+let currentUtterances = [];
+
+/* ============================================================
+   УТИЛИТЫ
+   ============================================================ */
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, ch => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[ch]));
+}
+
+function stripHtml(html){
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  return (tmp.textContent || tmp.innerText || '').trim();
+}
+
+function switchTab(name){
+  document.querySelectorAll('.tab-page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  document.querySelector('.tabs button[data-tab="' + name + '"]').classList.add('active');
+}
+
+/* ============================================================
+   ЗАГРУЗКА RSS
+   ============================================================ */
+async function fetchRSS(feed){
+  const url = CORS_PROXY + encodeURIComponent(feed.url);
+  const res = await fetch(url, { cache: 'no-store' });
+  if(!res.ok) throw new Error('HTTP ' + res.status);
+  const text = await res.text();
+  const parser = new DOMParser();
+  const xml = parser.parseFromString(text, 'text/xml');
+
+  // проверка на ошибку парсинга
+  if(xml.querySelector('parsererror')) throw new Error('Ошибка парсинга XML');
+
+  const items = xml.querySelectorAll('item');
+  const result = [];
+  items.forEach((item, idx) => {
+    if(idx >= 8) return; // не больше 8 с ленты
+    const title = item.querySelector('title')?.textContent?.trim() || '';
+    const desc = item.querySelector('description')?.textContent?.trim() || '';
+    const link = item.querySelector('link')?.textContent?.trim() || '';
+    if(!title) return;
+    result.push({
+      title,
+      desc: stripHtml(desc).slice(0, 300),
+      link,
+      source: feed.name,
+      side: feed.side
+    });
+  });
+  return result;
+}
+
+async function loadFeedGroup(group, key, limit){
+  const feeds = FEEDS[group] || [];
+  const results = [];
+  for(const feed of feeds){
+    try{
+      const items = await fetchRSS(feed);
+      results.push(...items);
+    }catch(e){
+      console.warn('Не удалось загрузить ' + feed.name, e);
+    }
+  }
+  // перемешиваем и ограничиваем
+  results.sort(() => Math.random() - 0.5);
+  allNews[key] = results.slice(0, limit);
+}
+
+async function loadAllNews(){
+  const statusEl = document.querySelector('#page-news .status');
+  if(statusEl) statusEl.textContent = 'Загрузка...';
+
+  // сброс
+  Object.keys(allNews).forEach(k => allNews[k] = []);
+
+  try{
+    await Promise.all([
+      loadFeedGroup('ukraine', 'ukraine', 6),
+      loadFeedGroup('world', 'world', 6),
+      loadFeedGroup('disasters', 'disasters', 4),
+      loadFeedGroup('misc', 'misc', 6),
+      loadFeedGroup('estonia', 'estonia', 4),
+      loadFeedGroup('weather', 'weather', 2)
+    ]);
+  }catch(e){
+    console.error(e);
+  }
+
+  renderAll();
+  if(statusEl) statusEl.textContent = 'Готово. Новостей: ' +
+    Object.values(allNews).reduce((s,a) => s + a.length, 0);
+}
+
+/* ============================================================
+   ОТРИСОВКА
+   ============================================================ */
+function renderGroup(containerId, items, emptyText){
+  const box = document.getElementById(containerId);
+  if(!items || !items.length){
+    box.innerHTML = '<div class="empty">' + (emptyText || 'Нет данных') + '</div>';
+    return;
+  }
+  box.innerHTML = '';
+  items.forEach(item => {
+    const el = document.createElement('div');
+    el.className = 'item';
+    const sideBadge = item.side === 'ru' ? '<span class="badge ru">РФ</span>' :
+                      item.side === 'ua' ? '<span class="badge ua">Украина</span>' :
+                      item.side === 'ee' ? '<span class="badge">Эстония</span>' :
+                      '<span class="badge world">Мир</span>';
+    el.innerHTML =
+      '<div class="item-head">' +
+        '<div>' +
+          '<div class="item-name">' + escapeHtml(item.title) + sideBadge + '</div>' +
+          '<div class="item-source">' + escapeHtml(item.source) + '</div>' +
+          (item.desc ? '<div class="item-desc">' + escapeHtml(item.desc) + '</div>' : '') +
+        '</div>' +
+      '</div>' +
+      '<div class="item-actions">' +
+        '<button class="btn-small" onclick="speakItem(\'' + escapeHtml(item.title).replace(/'/g, "\\'") + '\', \'' + escapeHtml(item.desc).replace(/'/g, "\\'") + '\', \'' + escapeHtml(item.source) + '\')">🔊 Озвучить</button>' +
+      '</div>';
+    box.appendChild(el);
+  });
+}
+
+function renderAll(){
+  renderGroup('ukraineList', allNews.ukraine, 'Нажмите «Загрузить новости»');
+  renderGroup('worldList', allNews.world, '—');
+  renderGroup('disasterList', allNews.disasters, '—');
+  renderGroup('miscList', allNews.misc, '—');
+  renderGroup('estoniaList', allNews.estonia, '—');
+  renderGroup('weatherList', allNews.weather, '—');
+}
+
+/* ============================================================
+   ОЗВУЧКА
+   ============================================================ */
+function getRussianVoice(){
+  const voices = window.speechSynthesis.getVoices();
+  // ищем ru-RU или просто ru
+  let v = voices.find(voice => voice.lang === 'ru-RU');
+  if(!v) v = voices.find(voice => voice.lang.startsWith('ru'));
+  return v || null;
+}
+
+function speakItem(title, desc, source){
+  if(!window.speechSynthesis){
+    alert('Синтез речи не поддерживается в этом браузере');
+    return;
+  }
+  window.speechSynthesis.cancel();
+  const text = 'Источник: ' + source + '. ' + title + '. ' + desc;
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.lang = 'ru-RU';
+  const voice = getRussianVoice();
+  if(voice) utter.voice = voice;
+  utter.rate = 0.95;
+  window.speechSynthesis.speak(utter);
+}
+
+function buildBroadcastText(){
+  const parts = [];
+  const duration = Number(document.getElementById('durationSelect').value) || 10;
+  // грубая оценка: 10 минут ≈ 1400 слов. Собираем блоки пропорционально.
+  // Для простоты: берём всё, что есть, но с ограничениями.
+
+  // 1. Украина (сравнение)
+  if(allNews.ukraine.length){
+    parts.push('Блок первый. Украина. Сравнение источников.');
+    const ru = allNews.ukraine.filter(n => n.side === 'ru').slice(0, 2);
+    const ua = allNews.ukraine.filter(n => n.side === 'ua').slice(0, 2);
+    const world = allNews.ukraine.filter(n => n.side === 'world').slice(0, 1);
+
+    ru.forEach(n => {
+      parts.push('По версии ' + n.source + '. ' + n.title + '. ' + (n.desc || ''));
+    });
+    ua.forEach(n => {
+      parts.push('По версии ' + n.source + '. ' + n.title + '. ' + (n.desc || ''));
+    });
+    world.forEach(n => {
+      parts.push('Международный источник ' + n.source + '. ' + n.title + '. ' + (n.desc || ''));
+    });
+  }
+
+  // 2. Мир
+  if(allNews.world.length){
+    parts.push('Переходим к мировым событиям.');
+    allNews.world.slice(0, duration >= 10 ? 4 : 2).forEach(n => {
+      parts.push(n.source + '. ' + n.title + '. ' + (n.desc || ''));
+    });
+  }
+
+  // 3. Катаклизмы
+  if(allNews.disasters.length){
+    parts.push('Катаклизмы и катастрофы.');
+    allNews.disasters.slice(0, 3).forEach(n => {
+      parts.push(n.title + '. ' + (n.desc || ''));
+    });
+  }
+
+  // 4. Прочее
+  if(allNews.misc.length){
+    parts.push('Спорт, космос, медицина, наука, технологии и культура.');
+    allNews.misc.slice(0, duration >= 15 ? 5 : 3).forEach(n => {
+      parts.push(n.title + '. ' + (n.desc || ''));
+    });
+  }
+
+  // 5. Эстония
+  if(allNews.estonia.length){
+    parts.push('Эстония. Политика и экономика.');
+    allNews.estonia.slice(0, 3).forEach(n => {
+      parts.push(n.source + '. ' + n.title + '. ' + (n.desc || ''));
+    });
+  }
+
+  // 6. Погода
+  if(allNews.weather.length){
+    parts.push('Погода.');
+    allNews.weather.slice(0, 1).forEach(n => {
+      parts.push(n.title + '. ' + (n.desc || ''));
+    });
+  }
+
+  return parts.join(' ');
+}
+
+function startBroadcast(){
+  if(!window.speechSynthesis){
+    alert('Синтез речи не поддерживается');
+    return;
+  }
+  if(!allNews.ukraine.length && !allNews.world.length && !allNews.estonia.length){
+    alert('Сначала загрузите новости');
+    return;
+  }
+
+  window.speechSynthesis.cancel();
+  isSpeaking = true;
+  document.getElementById('stopBtn').style.display = 'block';
+
+  const text = buildBroadcastText();
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.lang = 'ru-RU';
+  const voice = getRussianVoice();
+  if(voice) utter.voice = voice;
+  utter.rate = 0.95;
+
+  utter.onend = () => {
+    isSpeaking = false;
+    document.getElementById('stopBtn').style.display = 'none';
+  };
+  utter.onerror = () => {
+    isSpeaking = false;
+    document.getElementById('stopBtn').style.display = 'none';
+  };
+
+  currentUtterances = [utter];
+  window.speechSynthesis.speak(utter);
+}
+
+function stopBroadcast(){
+  window.speechSynthesis.cancel();
+  isSpeaking = false;
+  document.getElementById('stopBtn').style.display = 'none';
+}
+
+/* ============================================================
+   СТАРТ
+   ============================================================ */
+window.addEventListener('DOMContentLoaded', () => {
+  // подгружаем голоса асинхронно (важно для Android)
+  if(window.speechSynthesis){
+    window.speechSynthesis.getVoices();
+    window.speechSynthesis.onvoiceschanged = () => {
+      window.speechSynthesis.getVoices();
+    };
+  }
+  switchTab('news');
+});
+</script>
+</body>
+</html>
