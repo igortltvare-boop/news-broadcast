@@ -204,7 +204,7 @@ function switchTab(name){
    ЗАГРУЗКА RSS
    ============================================================ */
 async function fetchRSS(feed){
-  const url = CORS_PROXY + encodeURIComponent(feed.url);
+  const url = CORS_PROXY + feed.url;
   const res = await fetch(url, { cache: 'no-store' });
   if(!res.ok) throw new Error('HTTP ' + res.status);
   const text = await res.text();
