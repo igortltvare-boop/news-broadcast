@@ -136,7 +136,8 @@ select{
 <script>
 /* ============================================================
    КОНФИГУРАЦИЯ ИСТОЧНИКОВ
-   ============================================================ */const RSS2JSON = 'https://api.rss2json.com/v1/api.json?rss_url=';
+   ============================================================ */
+const RSS2JSON = 'https://api.rss2json.com/v1/api.json?rss_url=';
 
 const FEEDS = {
   // Украина: сравнение
@@ -217,7 +218,7 @@ async function fetchRSS(feed){
     source: feed.name,
     side: feed.side
   })).filter(x => x.title);
-  }
+}
 
 async function loadFeedGroup(group, key, limit){
   const feeds = FEEDS[group] || [];
@@ -306,10 +307,50 @@ function renderAll(){
    ============================================================ */
 function getRussianVoice(){
   const voices = window.speechSynthesis.getVoices();
-  // ищем ru-RU или просто ru
   let v = voices.find(voice => voice.lang === 'ru-RU');
   if(!v) v = voices.find(voice => voice.lang.startsWith('ru'));
   return v || null;
+}
+
+// Разбивает текст на предложения (по . ! ?), сохраняя знак в конце
+function splitIntoSentences(text){
+  return text.match(/[^.!?]+[.!?]*/g) || [text];
+}
+
+// Читает текст по предложениям. Останавливается, если isSpeaking = false.
+function speakSentences(text, onDone){
+  const sentences = splitIntoSentences(text);
+  let index = 0;
+
+  function speakNext(){
+    if(!isSpeaking) return; // остановлено пользователем
+    if(index >= sentences.length){
+      if(onDone) onDone();
+      return;
+    }
+    const sentence = sentences[index].trim();
+    if(!sentence){ index++; speakNext(); return; }
+
+    const utter = new SpeechSynthesisUtterance(sentence);
+    utter.lang = 'ru-RU'; // устанавливаем ДО speak()
+    const voice = getRussianVoice();
+    if(voice) utter.voice = voice;
+    utter.rate = 0.95;
+
+    utter.onend = () => {
+      index++;
+      setTimeout(speakNext, 30); // небольшая пауза между предложениями
+    };
+    utter.onerror = () => {
+      index++;
+      setTimeout(speakNext, 30);
+    };
+
+    currentUtterances.push(utter);
+    window.speechSynthesis.speak(utter);
+  }
+
+  speakNext();
 }
 
 function speakItem(title, desc, source){
@@ -318,20 +359,18 @@ function speakItem(title, desc, source){
     return;
   }
   window.speechSynthesis.cancel();
-  const text = 'Источник: ' + source + '. ' + title + '. ' + desc;
-  const utter = new SpeechSynthesisUtterance(text);
-  utter.lang = 'ru-RU';
-  const voice = getRussianVoice();
-  if(voice) utter.voice = voice;
-  utter.rate = 0.95;
-  window.speechSynthesis.speak(utter);
+  currentUtterances = [];
+  isSpeaking = true;
+
+  const text = 'Источник: ' + source + '. ' + title + '. ' + (desc || '');
+  speakSentences(text, () => {
+    isSpeaking = false;
+  });
 }
 
 function buildBroadcastText(){
   const parts = [];
   const duration = Number(document.getElementById('durationSelect').value) || 10;
-  // грубая оценка: 10 минут ≈ 1400 слов. Собираем блоки пропорционально.
-  // Для простоты: берём всё, что есть, но с ограничениями.
 
   // 1. Украина (сравнение)
   if(allNews.ukraine.length){
@@ -405,32 +444,21 @@ function startBroadcast(){
   }
 
   window.speechSynthesis.cancel();
+  currentUtterances = [];
   isSpeaking = true;
   document.getElementById('stopBtn').style.display = 'block';
 
   const text = buildBroadcastText();
-  const utter = new SpeechSynthesisUtterance(text);
-  utter.lang = 'ru-RU';
-  const voice = getRussianVoice();
-  if(voice) utter.voice = voice;
-  utter.rate = 0.95;
-
-  utter.onend = () => {
+  speakSentences(text, () => {
     isSpeaking = false;
     document.getElementById('stopBtn').style.display = 'none';
-  };
-  utter.onerror = () => {
-    isSpeaking = false;
-    document.getElementById('stopBtn').style.display = 'none';
-  };
-
-  currentUtterances = [utter];
-  window.speechSynthesis.speak(utter);
+  });
 }
 
 function stopBroadcast(){
-  window.speechSynthesis.cancel();
   isSpeaking = false;
+  window.speechSynthesis.cancel();
+  currentUtterances = [];
   document.getElementById('stopBtn').style.display = 'none';
 }
 
@@ -438,7 +466,6 @@ function stopBroadcast(){
    СТАРТ
    ============================================================ */
 window.addEventListener('DOMContentLoaded', () => {
-  // подгружаем голоса асинхронно (важно для Android)
   if(window.speechSynthesis){
     window.speechSynthesis.getVoices();
     window.speechSynthesis.onvoiceschanged = () => {
