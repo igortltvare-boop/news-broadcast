@@ -204,34 +204,20 @@ function switchTab(name){
    ЗАГРУЗКА RSS
    ============================================================ */
 async function fetchRSS(feed){
-  const url = CORS_PROXY + feed.url;
+  const url = RSS2JSON + encodeURIComponent(feed.url);
   const res = await fetch(url, { cache: 'no-store' });
   if(!res.ok) throw new Error('HTTP ' + res.status);
-  const text = await res.text();
-  const parser = new DOMParser();
-  const xml = parser.parseFromString(text, 'text/xml');
-
-  // проверка на ошибку парсинга
-  if(xml.querySelector('parsererror')) throw new Error('Ошибка парсинга XML');
-
-  const items = xml.querySelectorAll('item');
-  const result = [];
-  items.forEach((item, idx) => {
-    if(idx >= 8) return; // не больше 8 с ленты
-    const title = item.querySelector('title')?.textContent?.trim() || '';
-    const desc = item.querySelector('description')?.textContent?.trim() || '';
-    const link = item.querySelector('link')?.textContent?.trim() || '';
-    if(!title) return;
-    result.push({
-      title,
-      desc: stripHtml(desc).slice(0, 300),
-      link,
-      source: feed.name,
-      side: feed.side
-    });
-  });
-  return result;
-}
+  const data = await res.json();
+  if(data.status !== 'ok') throw new Error('rss2json: ' + (data.message || 'error'));
+  const items = data.items || [];
+  return items.slice(0, 8).map(item => ({
+    title: item.title || '',
+    desc: stripHtml(item.description || '').slice(0, 300),
+    link: item.link || '',
+    source: feed.name,
+    side: feed.side
+  })).filter(x => x.title);
+  }
 
 async function loadFeedGroup(group, key, limit){
   const feeds = FEEDS[group] || [];
