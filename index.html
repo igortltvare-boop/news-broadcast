@@ -121,8 +121,8 @@ select{
       Это PWA для чтения новостей с озвучкой. Данные не сохраняются — при каждом запуске новости загружаются заново.<br><br>
       Источники (РФ): РИА Новости, ТАСС.<br>
       Источники (Украина): Украинская правда, Укринформ.<br>
-      Источники (мир): BBC, Meduza, Reuters.<br>
-      Эстония: ERR, Postimees, Majandus24.<br><br>
+      Источники (мир): BBC Russian, Meduza.<br>
+      Эстония: ERR (рус.), Postimees (рус.).<br><br>
       Если озвучка не на русском — установите «Синтезатор речи Google» и скачайте русский язык в настройках Android.
     </p>
   </div>
@@ -135,7 +135,7 @@ select{
 
 <script>
 /* ============================================================
-   КОНФИГУРАЦИЯ ИСТОЧНИКОВ
+   КОНФИГУРАЦИЯ ИСТОЧНИКОВ (все на русском)
    ============================================================ */
 const RSS2JSON = 'https://api.rss2json.com/v1/api.json?rss_url=';
 
@@ -143,29 +143,27 @@ const FEEDS = {
   ukraine: [
     { url: 'https://ria.ru/export/rss2/archive/index.xml', name: 'РИА Новости', side: 'ru' },
     { url: 'https://tass.ru/rss/v2.xml', name: 'ТАСС', side: 'ru' },
-    { url: 'https://www.pravda.com.ua/rss/', name: 'Украинская правда', side: 'ua' },
+    { url: 'https://www.pravda.com.ua/rus/rss/', name: 'Украинская правда', side: 'ua' },
     { url: 'https://www.ukrinform.ru/rss/', name: 'Укринформ', side: 'ua' }
   ],
   world: [
-    { url: 'https://feeds.bbci.co.uk/news/world/rss.xml', name: 'BBC World', side: 'world' },
-    { url: 'https://meduza.io/rss/all', name: 'Meduza', side: 'world' },
-    { url: 'https://www.reutersagency.com/feed/?best-topics=world&post_type=best', name: 'Reuters', side: 'world' }
+    { url: 'https://feeds.bbci.co.uk/russian/rss.xml', name: 'BBC Russian', side: 'world' },
+    { url: 'https://meduza.io/rss/all', name: 'Meduza', side: 'world' }
   ],
   disasters: [
-    { url: 'https://feeds.bbci.co.uk/news/world/rss.xml', name: 'BBC World', side: 'world' },
+    { url: 'https://feeds.bbci.co.uk/russian/rss.xml', name: 'BBC Russian', side: 'world' },
     { url: 'https://meduza.io/rss/all', name: 'Meduza', side: 'world' }
   ],
   misc: [
-    { url: 'https://feeds.bbci.co.uk/news/rss.xml', name: 'BBC News', side: 'world' },
+    { url: 'https://feeds.bbci.co.uk/russian/rss.xml', name: 'BBC Russian', side: 'world' },
     { url: 'https://meduza.io/rss/all', name: 'Meduza', side: 'world' }
   ],
   estonia: [
-    { url: 'https://www.err.ee/rss', name: 'ERR', side: 'ee' },
-    { url: 'https://www.postimees.ee/rss', name: 'Postimees', side: 'ee' },
-    { url: 'https://majandus24.postimees.ee/rss', name: 'Majandus24', side: 'ee' }
+    { url: 'https://rus.err.ee/rss', name: 'ERR (рус.)', side: 'ee' },
+    { url: 'https://rus.postimees.ee/rss', name: 'Postimees (рус.)', side: 'ee' }
   ],
   weather: [
-    { url: 'https://www.err.ee/rss', name: 'ERR', side: 'ee' }
+    { url: 'https://rus.err.ee/rss', name: 'ERR (рус.)', side: 'ee' }
   ]
 };
 
@@ -173,7 +171,7 @@ let allNews = { ukraine: [], world: [], disasters: [], misc: [], estonia: [], we
 let isSpeaking = false;
 let currentUtterances = [];
 
-/* Кэш голоса — загружается один раз */
+/* Кэш русского голоса — загружается один раз */
 let cachedRussianVoice = null;
 let voicesLoaded = false;
 let noVoiceWarned = false;
@@ -308,7 +306,6 @@ function findRussianVoice(voices){
       || null;
 }
 
-// Загружаем голоса ОДИН раз. Если их нет сразу — ждём onvoiceschanged.
 function loadVoicesOnce(){
   return new Promise(resolve => {
     if(voicesLoaded){ resolve(); return; }
@@ -326,10 +323,8 @@ function loadVoicesOnce(){
 
     if(tryLoad()) return;
 
-    const handler = () => { tryLoad(); };
-    window.speechSynthesis.onvoiceschanged = handler;
+    window.speechSynthesis.onvoiceschanged = () => { tryLoad(); };
 
-    // страховка — не ждём дольше 2 секунд
     setTimeout(() => {
       tryLoad();
       resolve();
@@ -337,12 +332,10 @@ function loadVoicesOnce(){
   });
 }
 
-// Разбивает текст на предложения
 function splitIntoSentences(text){
   return text.match(/[^.!?]+[.!?]*/g) || [text];
 }
 
-// Читает текст по предложениям ОДНИМ И ТЕМ ЖЕ голосом
 function speakSentences(text, onDone){
   const sentences = splitIntoSentences(text);
   let index = 0;
@@ -357,7 +350,6 @@ function speakSentences(text, onDone){
     if(!sentence){ index++; speakNext(); return; }
 
     const utter = new SpeechSynthesisUtterance(sentence);
-    // Главное: если найден русский голос — используем его язык и сам голос
     if(cachedRussianVoice){
       utter.voice = cachedRussianVoice;
       utter.lang = cachedRussianVoice.lang;
@@ -391,9 +383,7 @@ function warnIfNoRussianVoice(){
     'В системе не найден русский голос для озвучки.\n\n' +
     'Установите его так:\n' +
     'Настройки → Система → Языки и ввод → Синтез речи → ' +
-    'Синтезатор речи Google → Установить голоса → Русский.\n\n' +
-    'Или установите «Синтезатор речи Google» из Play Market, ' +
-    'если его нет.'
+    'Синтезатор речи Google → Установить голоса → Русский.'
   );
 }
 
@@ -509,7 +499,6 @@ function stopBroadcast(){
    ============================================================ */
 window.addEventListener('DOMContentLoaded', () => {
   if(window.speechSynthesis){
-    // Запускаем загрузку голосов заранее
     loadVoicesOnce();
   }
   switchTab('news');
