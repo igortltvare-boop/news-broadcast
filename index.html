@@ -140,36 +140,30 @@ select{
 const RSS2JSON = 'https://api.rss2json.com/v1/api.json?rss_url=';
 
 const FEEDS = {
-  // Украина: сравнение
   ukraine: [
     { url: 'https://ria.ru/export/rss2/archive/index.xml', name: 'РИА Новости', side: 'ru' },
     { url: 'https://tass.ru/rss/v2.xml', name: 'ТАСС', side: 'ru' },
     { url: 'https://www.pravda.com.ua/rss/', name: 'Украинская правда', side: 'ua' },
     { url: 'https://www.ukrinform.ru/rss/', name: 'Укринформ', side: 'ua' }
   ],
-  // Мир: политика, экономика, конфликты
   world: [
     { url: 'https://feeds.bbci.co.uk/news/world/rss.xml', name: 'BBC World', side: 'world' },
     { url: 'https://meduza.io/rss/all', name: 'Meduza', side: 'world' },
     { url: 'https://www.reutersagency.com/feed/?best-topics=world&post_type=best', name: 'Reuters', side: 'world' }
   ],
-  // Катаклизмы
   disasters: [
     { url: 'https://feeds.bbci.co.uk/news/world/rss.xml', name: 'BBC World', side: 'world' },
     { url: 'https://meduza.io/rss/all', name: 'Meduza', side: 'world' }
   ],
-  // Спорт и прочее
   misc: [
     { url: 'https://feeds.bbci.co.uk/news/rss.xml', name: 'BBC News', side: 'world' },
     { url: 'https://meduza.io/rss/all', name: 'Meduza', side: 'world' }
   ],
-  // Эстония
   estonia: [
     { url: 'https://www.err.ee/rss', name: 'ERR', side: 'ee' },
     { url: 'https://www.postimees.ee/rss', name: 'Postimees', side: 'ee' },
     { url: 'https://majandus24.postimees.ee/rss', name: 'Majandus24', side: 'ee' }
   ],
-  // Погода
   weather: [
     { url: 'https://www.err.ee/rss', name: 'ERR', side: 'ee' }
   ]
@@ -178,6 +172,11 @@ const FEEDS = {
 let allNews = { ukraine: [], world: [], disasters: [], misc: [], estonia: [], weather: [] };
 let isSpeaking = false;
 let currentUtterances = [];
+
+/* Кэш голоса — загружается один раз */
+let cachedRussianVoice = null;
+let voicesLoaded = false;
+let noVoiceWarned = false;
 
 /* ============================================================
    УТИЛИТЫ
@@ -231,7 +230,6 @@ async function loadFeedGroup(group, key, limit){
       console.warn('Не удалось загрузить ' + feed.name, e);
     }
   }
-  // перемешиваем и ограничиваем
   results.sort(() => Math.random() - 0.5);
   allNews[key] = results.slice(0, limit);
 }
@@ -240,7 +238,6 @@ async function loadAllNews(){
   const statusEl = document.querySelector('#page-news .status');
   if(statusEl) statusEl.textContent = 'Загрузка...';
 
-  // сброс
   Object.keys(allNews).forEach(k => allNews[k] = []);
 
   try{
@@ -305,25 +302,53 @@ function renderAll(){
 /* ============================================================
    ОЗВУЧКА
    ============================================================ */
-function getRussianVoice(){
-  const voices = window.speechSynthesis.getVoices();
-  let v = voices.find(voice => voice.lang === 'ru-RU');
-  if(!v) v = voices.find(voice => voice.lang.startsWith('ru'));
-  return v || null;
+function findRussianVoice(voices){
+  return voices.find(v => v.lang === 'ru-RU')
+      || voices.find(v => v.lang && String(v.lang).toLowerCase().startsWith('ru'))
+      || null;
 }
 
-// Разбивает текст на предложения (по . ! ?), сохраняя знак в конце
+// Загружаем голоса ОДИН раз. Если их нет сразу — ждём onvoiceschanged.
+function loadVoicesOnce(){
+  return new Promise(resolve => {
+    if(voicesLoaded){ resolve(); return; }
+
+    function tryLoad(){
+      const voices = window.speechSynthesis.getVoices();
+      if(voices.length > 0){
+        cachedRussianVoice = findRussianVoice(voices);
+        voicesLoaded = true;
+        resolve();
+        return true;
+      }
+      return false;
+    }
+
+    if(tryLoad()) return;
+
+    const handler = () => { tryLoad(); };
+    window.speechSynthesis.onvoiceschanged = handler;
+
+    // страховка — не ждём дольше 2 секунд
+    setTimeout(() => {
+      tryLoad();
+      resolve();
+    }, 2000);
+  });
+}
+
+// Разбивает текст на предложения
 function splitIntoSentences(text){
   return text.match(/[^.!?]+[.!?]*/g) || [text];
 }
 
-// Читает текст по предложениям. Останавливается, если isSpeaking = false.
+// Читает текст по предложениям ОДНИМ И ТЕМ ЖЕ голосом
 function speakSentences(text, onDone){
   const sentences = splitIntoSentences(text);
   let index = 0;
 
   function speakNext(){
-    if(!isSpeaking) return; // остановлено пользователем
+    if(!isSpeaking) return;
     if(index >= sentences.length){
       if(onDone) onDone();
       return;
@@ -332,18 +357,22 @@ function speakSentences(text, onDone){
     if(!sentence){ index++; speakNext(); return; }
 
     const utter = new SpeechSynthesisUtterance(sentence);
-    utter.lang = 'ru-RU'; // устанавливаем ДО speak()
-    const voice = getRussianVoice();
-    if(voice) utter.voice = voice;
+    // Главное: если найден русский голос — используем его язык и сам голос
+    if(cachedRussianVoice){
+      utter.voice = cachedRussianVoice;
+      utter.lang = cachedRussianVoice.lang;
+    }else{
+      utter.lang = 'ru-RU';
+    }
     utter.rate = 0.95;
 
     utter.onend = () => {
       index++;
-      setTimeout(speakNext, 30); // небольшая пауза между предложениями
+      setTimeout(speakNext, 40);
     };
     utter.onerror = () => {
       index++;
-      setTimeout(speakNext, 30);
+      setTimeout(speakNext, 40);
     };
 
     currentUtterances.push(utter);
@@ -353,26 +382,41 @@ function speakSentences(text, onDone){
   speakNext();
 }
 
-function speakItem(title, desc, source){
+function warnIfNoRussianVoice(){
+  if(noVoiceWarned) return;
+  if(!voicesLoaded) return;
+  if(cachedRussianVoice) return;
+  noVoiceWarned = true;
+  alert(
+    'В системе не найден русский голос для озвучки.\n\n' +
+    'Установите его так:\n' +
+    'Настройки → Система → Языки и ввод → Синтез речи → ' +
+    'Синтезатор речи Google → Установить голоса → Русский.\n\n' +
+    'Или установите «Синтезатор речи Google» из Play Market, ' +
+    'если его нет.'
+  );
+}
+
+async function speakItem(title, desc, source){
   if(!window.speechSynthesis){
     alert('Синтез речи не поддерживается в этом браузере');
     return;
   }
+  await loadVoicesOnce();
+  warnIfNoRussianVoice();
+
   window.speechSynthesis.cancel();
   currentUtterances = [];
   isSpeaking = true;
 
   const text = 'Источник: ' + source + '. ' + title + '. ' + (desc || '');
-  speakSentences(text, () => {
-    isSpeaking = false;
-  });
+  speakSentences(text, () => { isSpeaking = false; });
 }
 
 function buildBroadcastText(){
   const parts = [];
   const duration = Number(document.getElementById('durationSelect').value) || 10;
 
-  // 1. Украина (сравнение)
   if(allNews.ukraine.length){
     parts.push('Блок первый. Украина. Сравнение источников.');
     const ru = allNews.ukraine.filter(n => n.side === 'ru').slice(0, 2);
@@ -390,7 +434,6 @@ function buildBroadcastText(){
     });
   }
 
-  // 2. Мир
   if(allNews.world.length){
     parts.push('Переходим к мировым событиям.');
     allNews.world.slice(0, duration >= 10 ? 4 : 2).forEach(n => {
@@ -398,7 +441,6 @@ function buildBroadcastText(){
     });
   }
 
-  // 3. Катаклизмы
   if(allNews.disasters.length){
     parts.push('Катаклизмы и катастрофы.');
     allNews.disasters.slice(0, 3).forEach(n => {
@@ -406,7 +448,6 @@ function buildBroadcastText(){
     });
   }
 
-  // 4. Прочее
   if(allNews.misc.length){
     parts.push('Спорт, космос, медицина, наука, технологии и культура.');
     allNews.misc.slice(0, duration >= 15 ? 5 : 3).forEach(n => {
@@ -414,7 +455,6 @@ function buildBroadcastText(){
     });
   }
 
-  // 5. Эстония
   if(allNews.estonia.length){
     parts.push('Эстония. Политика и экономика.');
     allNews.estonia.slice(0, 3).forEach(n => {
@@ -422,7 +462,6 @@ function buildBroadcastText(){
     });
   }
 
-  // 6. Погода
   if(allNews.weather.length){
     parts.push('Погода.');
     allNews.weather.slice(0, 1).forEach(n => {
@@ -433,7 +472,7 @@ function buildBroadcastText(){
   return parts.join(' ');
 }
 
-function startBroadcast(){
+async function startBroadcast(){
   if(!window.speechSynthesis){
     alert('Синтез речи не поддерживается');
     return;
@@ -442,6 +481,9 @@ function startBroadcast(){
     alert('Сначала загрузите новости');
     return;
   }
+
+  await loadVoicesOnce();
+  warnIfNoRussianVoice();
 
   window.speechSynthesis.cancel();
   currentUtterances = [];
@@ -467,10 +509,8 @@ function stopBroadcast(){
    ============================================================ */
 window.addEventListener('DOMContentLoaded', () => {
   if(window.speechSynthesis){
-    window.speechSynthesis.getVoices();
-    window.speechSynthesis.onvoiceschanged = () => {
-      window.speechSynthesis.getVoices();
-    };
+    // Запускаем загрузку голосов заранее
+    loadVoicesOnce();
   }
   switchTab('news');
 });
