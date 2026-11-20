@@ -78,14 +78,19 @@ select{
     <button class="btn-main" onclick="startBroadcast()">▶ Озвучить выпуск</button>
     <button class="btn-stop" onclick="stopBroadcast()" id="stopBtn" style="display:none">■ Остановить</button>
     <div class="hint">
-      Блок «Украина»: сравнение источников (РФ / Украина).<br>
-      Остальные темы — без украинской повестки, из доступных RSS.
+      Порядок: Украина → Россия → Мир → Катаклизмы → Прочее → Эстония → Погода.<br>
+      Каждый источник используется только в одном блоке. Повторы отсекаются глобально.
     </div>
   </div>
 
   <div class="card">
     <h2>Украина (сравнение)</h2>
     <div id="ukraineList"><div class="empty">Нажмите «Загрузить новости»</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Россия (внутренняя повестка)</h2>
+    <div id="russiaList"><div class="empty">—</div></div>
   </div>
 
   <div class="card">
@@ -118,13 +123,15 @@ select{
   <div class="card">
     <h2>О приложении</h2>
     <p class="hint">
-      Это PWA для чтения новостей с озвучкой. Данные не сохраняются — при каждом запуске новости загружаются заново.<br><br>
-      Источники (РФ): РИА Новости, ТАСС, Вести.ру, Лента.ру.<br>
-      Источники (Украина): Украинская правда.<br>
-      Источники (мир): BBC Russian, Meduza, РБК.<br>
-      Эстония: ERR (рус.), Postimees (рус.).<br>
-      Погода: Open-Meteo / wttr.in (Таллинн).<br><br>
-      В блоках, кроме «Украины», новости с украинской тематикой фильтруются, чтобы не перевешивать выпуск.
+      PWA для чтения новостей с озвучкой. Данные не сохраняются — при каждом запуске новости загружаются заново.<br><br>
+      <b>Украина:</b> РИА, ТАСС, Вести.ру (РФ) + Украинская правда (УА).<br>
+      <b>Россия:</b> РБК, Лента.ру, Российская газета, Известия, Gazeta.ru.<br>
+      <b>Мир:</b> BBC Russian, Meduza.<br>
+      <b>Катаклизмы:</b> Коммерсантъ + BBC Russian.<br>
+      <b>Прочее:</b> Naked Science, Спорт-Экспресс, BBC (наука/спорт).<br>
+      <b>Эстония:</b> ERR (рус.), Postimees (рус.).<br>
+      <b>Погода:</b> Open-Meteo / wttr.in.<br><br>
+      Если озвучка не на русском — установите русский голос в настройках синтезатора речи Android.
     </p>
   </div>
 </div>
@@ -136,7 +143,7 @@ select{
 
 <script>
 /* ============================================================
-   КОНФИГУРАЦИЯ ИСТОЧНИКОВ
+   КОНФИГУРАЦИЯ: один источник — один блок
    ============================================================ */
 const RSS2JSON = 'https://api.rss2json.com/v1/api.json?rss_url=';
 
@@ -147,17 +154,24 @@ const FEEDS = {
     { url: 'https://www.vesti.ru/vesti.rss', name: 'Вести.ру', side: 'ru' },
     { url: 'https://www.pravda.com.ua/rus/rss/', name: 'Украинская правда', side: 'ua' }
   ],
-  world: [
+  russia: [
     { url: 'https://rssexport.rbc.ru/rbcnews/news/30/full.rss', name: 'РБК', side: 'ru' },
+    { url: 'https://lenta.ru/rss/news', name: 'Лента.ру', side: 'ru' },
+    { url: 'https://rg.ru/xml/index.xml', name: 'Российская газета', side: 'ru' },
+    { url: 'https://iz.ru/xml/rss/all.xml', name: 'Известия', side: 'ru' },
+    { url: 'http://www.gazeta.ru/export/rss/first.xml', name: 'Gazeta.ru', side: 'ru' }
+  ],
+  world: [
     { url: 'https://feeds.bbci.co.uk/russian/rss.xml', name: 'BBC Russian', side: 'world' },
     { url: 'https://meduza.io/rss/all', name: 'Meduza', side: 'world' }
   ],
   disasters: [
-    { url: 'https://rssexport.rbc.ru/rbcnews/news/30/full.rss', name: 'РБК', side: 'ru' },
+    { url: 'https://www.kommersant.ru/RSS/main.xml', name: 'Коммерсантъ', side: 'ru' },
     { url: 'https://feeds.bbci.co.uk/russian/rss.xml', name: 'BBC Russian', side: 'world' }
   ],
   misc: [
-    { url: 'https://lenta.ru/rss/news', name: 'Лента.ру', side: 'ru' },
+    { url: 'https://naked-science.ru/feed', name: 'Naked Science', side: 'ru' },
+    { url: 'https://www.sport-express.ru/services/materials/news/se/', name: 'Спорт-Экспресс', side: 'ru' },
     { url: 'https://feeds.bbci.co.uk/russian/rss.xml', name: 'BBC Russian', side: 'world' }
   ],
   estonia: [
@@ -166,28 +180,42 @@ const FEEDS = {
   ]
 };
 
-let allNews = { ukraine: [], world: [], disasters: [], misc: [], estonia: [], weather: [] };
+let allNews = { ukraine: [], russia: [], world: [], disasters: [], misc: [], estonia: [], weather: [] };
 let isSpeaking = false;
 let currentUtterances = [];
 let currentSpeechToken = 0;
+let globalSeenTitles = new Set();
 
 let cachedRussianVoice = null;
 let voicesLoaded = false;
 let noVoiceWarned = false;
 
 /* ============================================================
-   ФИЛЬТР УКРАИНСКОЙ ПОВЕСТКИ (для блоков, кроме «Украина»)
+   ФИЛЬТРЫ
    ============================================================ */
 const UKRAINE_KEYWORDS = [
   'украин', 'україн', 'киев', 'київ', 'зеленск', 'зсу', 'всу',
   'всушник', 'кулеб', 'ермак', 'офис президента', 'офіс президента',
   'донбасс', 'донецк', 'луганск', 'харьков', 'харків', 'одесс',
-  'николаев', 'херсон', 'запорож', 'кривой рог', 'сумы', 'чернигов'
+  'николаев', 'херсон', 'запорож', 'кривой рог', 'сумы', 'чернигов',
+  'обстрел', 'фронт', 'передовая', 'боевые действия'
+];
+
+const FOREIGN_POLICY_KEYWORDS = [
+  'сша', 'нато', 'ес', 'санкц', 'трамп', 'байден', 'саммит',
+  'переговор', 'госдеп', 'белый дом', 'евросоюз', 'брюссел'
 ];
 
 function isUkraineTopic(item){
   const text = ((item.title || '') + ' ' + (item.desc || '')).toLowerCase();
   return UKRAINE_KEYWORDS.some(kw => text.includes(kw));
+}
+
+function isRussiaInternal(item){
+  const text = ((item.title || '') + ' ' + (item.desc || '')).toLowerCase();
+  if(UKRAINE_KEYWORDS.some(kw => text.includes(kw))) return false;
+  if(FOREIGN_POLICY_KEYWORDS.some(kw => text.includes(kw))) return false;
+  return true;
 }
 
 /* ============================================================
@@ -203,6 +231,10 @@ function stripHtml(html){
   const tmp = document.createElement('div');
   tmp.innerHTML = html;
   return (tmp.textContent || tmp.innerText || '').trim();
+}
+
+function titleKey(title){
+  return String(title || '').toLowerCase().replace(/[^a-zа-яё0-9]/gi, '');
 }
 
 function switchTab(name){
@@ -236,10 +268,21 @@ async function loadFeedGroup(group, key, limit){
   const results = [];
   for(const feed of feeds){
     try{
-      const items = await fetchRSS(feed);
-      // Для всех блоков, кроме «Украина», отсекаем украинскую повестку
-      const filtered = key === 'ukraine' ? items : items.filter(it => !isUkraineTopic(it));
-      results.push(...filtered);
+      let items = await fetchRSS(feed);
+      // Фильтр по блоку
+      if(key === 'russia'){
+        items = items.filter(isRussiaInternal);
+      }else if(key !== 'ukraine'){
+        items = items.filter(it => !isUkraineTopic(it));
+      }
+      // Глобальная дедупликация
+      items = items.filter(it => {
+        const k = titleKey(it.title);
+        if(!k || globalSeenTitles.has(k)) return false;
+        globalSeenTitles.add(k);
+        return true;
+      });
+      results.push(...items);
     }catch(e){
       console.warn('Не удалось загрузить ' + feed.name, e);
     }
@@ -320,13 +363,15 @@ async function loadAllNews(){
   if(statusEl) statusEl.textContent = 'Загрузка...';
 
   Object.keys(allNews).forEach(k => allNews[k] = []);
+  globalSeenTitles = new Set();
 
   try{
     await Promise.all([
       loadFeedGroup('ukraine', 'ukraine', 6),
-      loadFeedGroup('world', 'world', 6),
+      loadFeedGroup('russia', 'russia', 6),
+      loadFeedGroup('world', 'world', 4),
       loadFeedGroup('disasters', 'disasters', 4),
-      loadFeedGroup('misc', 'misc', 6),
+      loadFeedGroup('misc', 'misc', 5),
       loadFeedGroup('estonia', 'estonia', 4),
       loadWeather()
     ]);
@@ -373,6 +418,7 @@ function renderGroup(containerId, items, emptyText){
 
 function renderAll(){
   renderGroup('ukraineList', allNews.ukraine, 'Нажмите «Загрузить новости»');
+  renderGroup('russiaList', allNews.russia, '—');
   renderGroup('worldList', allNews.world, '—');
   renderGroup('disasterList', allNews.disasters, '—');
   renderGroup('miscList', allNews.misc, '—');
@@ -493,71 +539,50 @@ async function speakItem(title, desc, source){
   });
 }
 
+/* ============================================================
+   СБОРКА ВЫПУСКА: Украина → Россия → Мир → Катаклизмы → Прочее → Эстония → Погода
+   ============================================================ */
 function buildBroadcastText(){
   const parts = [];
-  const used = new Set();
   const duration = Number(document.getElementById('durationSelect').value) || 10;
 
-  function addNews(n, prefix){
-    const key = String(n.title || '').toLowerCase().replace(/[^a-zа-яё0-9]/gi, '');
-    if(!key || used.has(key)) return false;
-    used.add(key);
-    parts.push((prefix || '') + n.title + '. ' + (n.desc || ''));
-    return true;
+  function addBlock(header, items, limit, prefixFn){
+    if(!items.length) return;
+    parts.push(header);
+    let count = 0;
+    for(const n of items){
+      if(count >= limit) break;
+      const prefix = prefixFn ? prefixFn(n) : '';
+      parts.push(prefix + n.title + '. ' + (n.desc || ''));
+      count++;
+    }
   }
 
-  // 1. Украина: 3 РФ, 1 Украина
+  // 1. Украина: 3 РФ, 1 УА
   if(allNews.ukraine.length){
     parts.push('Блок первый. Украина. Сравнение источников.');
     const ru = allNews.ukraine.filter(n => n.side === 'ru').slice(0, 3);
     const ua = allNews.ukraine.filter(n => n.side === 'ua').slice(0, 1);
-    ru.forEach(n => addNews(n, 'По версии ' + n.source + '. '));
-    ua.forEach(n => addNews(n, 'По версии ' + n.source + '. '));
+    ru.forEach(n => parts.push('По версии ' + n.source + '. ' + n.title + '. ' + (n.desc || '')));
+    ua.forEach(n => parts.push('По версии ' + n.source + '. ' + n.title + '. ' + (n.desc || '')));
   }
 
-  // 2. Мир (без Украины)
-  if(allNews.world.length){
-    parts.push('Переходим к мировым событиям.');
-    const limit = duration >= 10 ? 4 : 2;
-    let count = 0;
-    for(const n of allNews.world){
-      if(count >= limit) break;
-      if(addNews(n, n.source + '. ')) count++;
-    }
-  }
+  // 2. Россия (внутренняя повестка)
+  addBlock('Россия. Внутренняя повестка.', allNews.russia, duration >= 10 ? 4 : 2, n => n.source + '. ');
 
-  // 3. Катаклизмы
-  if(allNews.disasters.length){
-    parts.push('Катаклизмы и катастрофы.');
-    let count = 0;
-    for(const n of allNews.disasters){
-      if(count >= 3) break;
-      if(addNews(n, '')) count++;
-    }
-  }
+  // 3. Мир
+  addBlock('Переходим к мировым событиям.', allNews.world, duration >= 10 ? 3 : 2, n => n.source + '. ');
 
-  // 4. Прочее
-  if(allNews.misc.length){
-    parts.push('Спорт, космос, медицина, наука, технологии и культура.');
-    const limit = duration >= 15 ? 5 : 3;
-    let count = 0;
-    for(const n of allNews.misc){
-      if(count >= limit) break;
-      if(addNews(n, n.source + '. ')) count++;
-    }
-  }
+  // 4. Катаклизмы
+  addBlock('Катаклизмы и катастрофы.', allNews.disasters, 3, () => '');
 
-  // 5. Эстония
-  if(allNews.estonia.length){
-    parts.push('Эстония. Политика и экономика.');
-    let count = 0;
-    for(const n of allNews.estonia){
-      if(count >= 3) break;
-      if(addNews(n, n.source + '. ')) count++;
-    }
-  }
+  // 5. Прочее
+  addBlock('Спорт, космос, медицина, наука, технологии и культура.', allNews.misc, duration >= 15 ? 4 : 3, n => n.source + '. ');
 
-  // 6. Погода
+  // 6. Эстония
+  addBlock('Эстония. Политика и экономика.', allNews.estonia, 3, n => n.source + '. ');
+
+  // 7. Погода
   if(allNews.weather.length){
     parts.push('Погода.');
     allNews.weather.slice(0, 1).forEach(n => {
@@ -573,7 +598,7 @@ async function startBroadcast(){
     alert('Синтез речи не поддерживается');
     return;
   }
-  if(!allNews.ukraine.length && !allNews.world.length && !allNews.estonia.length){
+  if(!allNews.ukraine.length && !allNews.russia.length && !allNews.world.length && !allNews.estonia.length){
     alert('Сначала загрузите новости');
     return;
   }
