@@ -122,7 +122,8 @@ select{
       Источники (РФ): РИА Новости, ТАСС.<br>
       Источники (Украина): Украинская правда, Укринформ.<br>
       Источники (мир): BBC Russian, Meduza.<br>
-      Эстония: ERR (рус.), Postimees (рус.).<br><br>
+      Эстония: ERR (рус.), Postimees (рус.).<br>
+      Погода: Open-Meteo (Таллинн).<br><br>
       Если озвучка не на русском — установите «Синтезатор речи Google» и скачайте русский язык в настройках Android.
     </p>
   </div>
@@ -161,17 +162,15 @@ const FEEDS = {
   estonia: [
     { url: 'https://rus.err.ee/rss', name: 'ERR (рус.)', side: 'ee' },
     { url: 'https://rus.postimees.ee/rss', name: 'Postimees (рус.)', side: 'ee' }
-  ],
-  weather: [
-    { url: 'https://rus.err.ee/rss', name: 'ERR (рус.)', side: 'ee' }
   ]
 };
 
 let allNews = { ukraine: [], world: [], disasters: [], misc: [], estonia: [], weather: [] };
 let isSpeaking = false;
 let currentUtterances = [];
+let currentSpeechToken = 0;
 
-/* Кэш русского голоса — загружается один раз */
+/* Кэш русского голоса */
 let cachedRussianVoice = null;
 let voicesLoaded = false;
 let noVoiceWarned = false;
@@ -232,6 +231,45 @@ async function loadFeedGroup(group, key, limit){
   allNews[key] = results.slice(0, limit);
 }
 
+/* ============================================================
+   ПОГОДА (Open-Meteo, Таллинн)
+   ============================================================ */
+function weatherCodeToText(code){
+  const map = {
+    0:'ясно',1:'преимущественно ясно',2:'переменная облачность',3:'пасмурно',
+    45:'туман',48:'изморозь',
+    51:'лёгкая морозь',53:'морось',55:'сильная морось',
+    61:'небольшой дождь',63:'дождь',65:'сильный дождь',
+    71:'небольшой снег',73:'снег',75:'сильный снег',
+    80:'ливень',81:'сильный ливень',82:'очень сильный ливень',
+    95:'гроза',96:'гроза с градом',99:'сильная гроза с градом'
+  };
+  return map[code] || 'облачно';
+}
+
+async function loadWeather(){
+  try{
+    const url = 'https://api.open-meteo.com/v1/forecast?latitude=59.437&longitude=24.7536&current=temperature_2m,weather_code,wind_speed_10m&timezone=Europe/Tallinn';
+    const res = await fetch(url, { cache: 'no-store' });
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const c = data.current;
+    if(!c) throw new Error('нет данных');
+    const desc = weatherCodeToText(c.weather_code);
+    const temp = Math.round(c.temperature_2m);
+    const wind = Math.round(c.wind_speed_10m);
+    allNews.weather = [{
+      title: 'Погода в Таллинне: ' + desc + ', ' + temp + '°C',
+      desc: 'Ветер ' + wind + ' м/с.',
+      source: 'Open-Meteo',
+      side: 'ee'
+    }];
+  }catch(e){
+    console.warn('Погода не загрузилась', e);
+    allNews.weather = [];
+  }
+}
+
 async function loadAllNews(){
   const statusEl = document.querySelector('#page-news .status');
   if(statusEl) statusEl.textContent = 'Загрузка...';
@@ -245,7 +283,7 @@ async function loadAllNews(){
       loadFeedGroup('disasters', 'disasters', 4),
       loadFeedGroup('misc', 'misc', 6),
       loadFeedGroup('estonia', 'estonia', 4),
-      loadFeedGroup('weather', 'weather', 2)
+      loadWeather()
     ]);
   }catch(e){
     console.error(e);
@@ -336,11 +374,13 @@ function splitIntoSentences(text){
   return text.match(/[^.!?]+[.!?]*/g) || [text];
 }
 
-function speakSentences(text, onDone){
+/* Читает текст по предложениям. token защищает от двойного запуска. */
+function speakSentences(text, token, onDone){
   const sentences = splitIntoSentences(text);
   let index = 0;
 
   function speakNext(){
+    if(token !== currentSpeechToken) return; // устаревший запуск
     if(!isSpeaking) return;
     if(index >= sentences.length){
       if(onDone) onDone();
@@ -358,14 +398,16 @@ function speakSentences(text, onDone){
     }
     utter.rate = 0.95;
 
-    utter.onend = () => {
+    let handled = false;
+    function advance(){
+      if(handled) return;
+      handled = true;
       index++;
       setTimeout(speakNext, 40);
-    };
-    utter.onerror = () => {
-      index++;
-      setTimeout(speakNext, 40);
-    };
+    }
+
+    utter.onend = advance;
+    utter.onerror = advance;
 
     currentUtterances.push(utter);
     window.speechSynthesis.speak(utter);
@@ -397,10 +439,14 @@ async function speakItem(title, desc, source){
 
   window.speechSynthesis.cancel();
   currentUtterances = [];
+  currentSpeechToken = Date.now();
+  const token = currentSpeechToken;
   isSpeaking = true;
 
   const text = 'Источник: ' + source + '. ' + title + '. ' + (desc || '');
-  speakSentences(text, () => { isSpeaking = false; });
+  speakSentences(text, token, () => {
+    if(token === currentSpeechToken) isSpeaking = false;
+  });
 }
 
 function buildBroadcastText(){
@@ -477,13 +523,17 @@ async function startBroadcast(){
 
   window.speechSynthesis.cancel();
   currentUtterances = [];
+  currentSpeechToken = Date.now();
+  const token = currentSpeechToken;
   isSpeaking = true;
   document.getElementById('stopBtn').style.display = 'block';
 
   const text = buildBroadcastText();
-  speakSentences(text, () => {
-    isSpeaking = false;
-    document.getElementById('stopBtn').style.display = 'none';
+  speakSentences(text, token, () => {
+    if(token === currentSpeechToken){
+      isSpeaking = false;
+      document.getElementById('stopBtn').style.display = 'none';
+    }
   });
 }
 
@@ -491,6 +541,7 @@ function stopBroadcast(){
   isSpeaking = false;
   window.speechSynthesis.cancel();
   currentUtterances = [];
+  currentSpeechToken = Date.now();
   document.getElementById('stopBtn').style.display = 'none';
 }
 
