@@ -78,8 +78,8 @@ select{
     <button class="btn-main" onclick="startBroadcast()">▶ Озвучить выпуск</button>
     <button class="btn-stop" onclick="stopBroadcast()" id="stopBtn" style="display:none">■ Остановить</button>
     <div class="hint">
-      Блок «Украина»: сравнение источников (РФ / Украина / мир).<br>
-      Остальные темы — из доступных RSS. Озвучка через браузер.
+      Блок «Украина»: сравнение источников (РФ / Украина).<br>
+      Остальные темы — без украинской повестки, из доступных RSS.
     </div>
   </div>
 
@@ -119,12 +119,12 @@ select{
     <h2>О приложении</h2>
     <p class="hint">
       Это PWA для чтения новостей с озвучкой. Данные не сохраняются — при каждом запуске новости загружаются заново.<br><br>
-      Источники (РФ): РИА Новости, ТАСС.<br>
-      Источники (Украина): Украинская правда, Укринформ.<br>
-      Источники (мир): BBC Russian, Meduza.<br>
+      Источники (РФ): РИА Новости, ТАСС, Вести.ру, Лента.ру.<br>
+      Источники (Украина): Украинская правда.<br>
+      Источники (мир): BBC Russian, Meduza, РБК.<br>
       Эстония: ERR (рус.), Postimees (рус.).<br>
-      Погода: Open-Meteo (Таллинн).<br><br>
-      Если озвучка не на русском — установите «Синтезатор речи Google» и скачайте русский язык в настройках Android.
+      Погода: Open-Meteo / wttr.in (Таллинн).<br><br>
+      В блоках, кроме «Украины», новости с украинской тематикой фильтруются, чтобы не перевешивать выпуск.
     </p>
   </div>
 </div>
@@ -136,7 +136,7 @@ select{
 
 <script>
 /* ============================================================
-   КОНФИГУРАЦИЯ ИСТОЧНИКОВ (все на русском)
+   КОНФИГУРАЦИЯ ИСТОЧНИКОВ
    ============================================================ */
 const RSS2JSON = 'https://api.rss2json.com/v1/api.json?rss_url=';
 
@@ -144,20 +144,21 @@ const FEEDS = {
   ukraine: [
     { url: 'https://ria.ru/export/rss2/archive/index.xml', name: 'РИА Новости', side: 'ru' },
     { url: 'https://tass.ru/rss/v2.xml', name: 'ТАСС', side: 'ru' },
-    { url: 'https://www.pravda.com.ua/rus/rss/', name: 'Украинская правда', side: 'ua' },
-    { url: 'https://www.ukrinform.ru/rss/', name: 'Укринформ', side: 'ua' }
+    { url: 'https://www.vesti.ru/vesti.rss', name: 'Вести.ру', side: 'ru' },
+    { url: 'https://www.pravda.com.ua/rus/rss/', name: 'Украинская правда', side: 'ua' }
   ],
   world: [
+    { url: 'https://rssexport.rbc.ru/rbcnews/news/30/full.rss', name: 'РБК', side: 'ru' },
     { url: 'https://feeds.bbci.co.uk/russian/rss.xml', name: 'BBC Russian', side: 'world' },
     { url: 'https://meduza.io/rss/all', name: 'Meduza', side: 'world' }
   ],
   disasters: [
-    { url: 'https://feeds.bbci.co.uk/russian/rss.xml', name: 'BBC Russian', side: 'world' },
-    { url: 'https://meduza.io/rss/all', name: 'Meduza', side: 'world' }
+    { url: 'https://rssexport.rbc.ru/rbcnews/news/30/full.rss', name: 'РБК', side: 'ru' },
+    { url: 'https://feeds.bbci.co.uk/russian/rss.xml', name: 'BBC Russian', side: 'world' }
   ],
   misc: [
-    { url: 'https://feeds.bbci.co.uk/russian/rss.xml', name: 'BBC Russian', side: 'world' },
-    { url: 'https://meduza.io/rss/all', name: 'Meduza', side: 'world' }
+    { url: 'https://lenta.ru/rss/news', name: 'Лента.ру', side: 'ru' },
+    { url: 'https://feeds.bbci.co.uk/russian/rss.xml', name: 'BBC Russian', side: 'world' }
   ],
   estonia: [
     { url: 'https://rus.err.ee/rss', name: 'ERR (рус.)', side: 'ee' },
@@ -170,10 +171,24 @@ let isSpeaking = false;
 let currentUtterances = [];
 let currentSpeechToken = 0;
 
-/* Кэш русского голоса */
 let cachedRussianVoice = null;
 let voicesLoaded = false;
 let noVoiceWarned = false;
+
+/* ============================================================
+   ФИЛЬТР УКРАИНСКОЙ ПОВЕСТКИ (для блоков, кроме «Украина»)
+   ============================================================ */
+const UKRAINE_KEYWORDS = [
+  'украин', 'україн', 'киев', 'київ', 'зеленск', 'зсу', 'всу',
+  'всушник', 'кулеб', 'ермак', 'офис президента', 'офіс президента',
+  'донбасс', 'донецк', 'луганск', 'харьков', 'харків', 'одесс',
+  'николаев', 'херсон', 'запорож', 'кривой рог', 'сумы', 'чернигов'
+];
+
+function isUkraineTopic(item){
+  const text = ((item.title || '') + ' ' + (item.desc || '')).toLowerCase();
+  return UKRAINE_KEYWORDS.some(kw => text.includes(kw));
+}
 
 /* ============================================================
    УТИЛИТЫ
@@ -222,7 +237,9 @@ async function loadFeedGroup(group, key, limit){
   for(const feed of feeds){
     try{
       const items = await fetchRSS(feed);
-      results.push(...items);
+      // Для всех блоков, кроме «Украина», отсекаем украинскую повестку
+      const filtered = key === 'ukraine' ? items : items.filter(it => !isUkraineTopic(it));
+      results.push(...filtered);
     }catch(e){
       console.warn('Не удалось загрузить ' + feed.name, e);
     }
@@ -232,13 +249,13 @@ async function loadFeedGroup(group, key, limit){
 }
 
 /* ============================================================
-   ПОГОДА (Open-Meteo, Таллинн)
+   ПОГОДА
    ============================================================ */
 function weatherCodeToText(code){
   const map = {
     0:'ясно',1:'преимущественно ясно',2:'переменная облачность',3:'пасмурно',
     45:'туман',48:'изморозь',
-    51:'лёгкая морозь',53:'морось',55:'сильная морось',
+    51:'лёгкая морось',53:'морось',55:'сильная морось',
     61:'небольшой дождь',63:'дождь',65:'сильный дождь',
     71:'небольшой снег',73:'снег',75:'сильный снег',
     80:'ливень',81:'сильный ливень',82:'очень сильный ливень',
@@ -247,26 +264,54 @@ function weatherCodeToText(code){
   return map[code] || 'облачно';
 }
 
+async function loadWeatherOpenMeteo(){
+  const url = 'https://api.open-meteo.com/v1/forecast?latitude=59.437&longitude=24.7536&current=temperature_2m,weather_code,wind_speed_10m&timezone=Europe/Tallinn';
+  const res = await fetch(url, { cache: 'no-store' });
+  if(!res.ok) throw new Error('HTTP ' + res.status);
+  const data = await res.json();
+  const c = data.current;
+  if(!c) throw new Error('нет данных');
+  return {
+    title: 'Погода в Таллинне: ' + weatherCodeToText(c.weather_code) + ', ' + Math.round(c.temperature_2m) + '°C',
+    desc: 'Ветер ' + Math.round(c.wind_speed_10m) + ' м/с.',
+    source: 'Open-Meteo',
+    side: 'ee'
+  };
+}
+
+async function loadWeatherWttr(){
+  const url = 'https://wttr.in/Tallinn?format=j1';
+  const res = await fetch(url, { cache: 'no-store' });
+  if(!res.ok) throw new Error('HTTP ' + res.status);
+  const data = await res.json();
+  const cur = data.current_condition && data.current_condition[0];
+  if(!cur) throw new Error('нет данных');
+  const desc = (cur.lang_ru && cur.lang_ru[0] && cur.lang_ru[0].value) || cur.weatherDesc[0].value;
+  return {
+    title: 'Погода в Таллинне: ' + desc + ', ' + cur.temp_C + '°C',
+    desc: 'Ветер ' + cur.windspeedKmph + ' км/ч.',
+    source: 'wttr.in',
+    side: 'ee'
+  };
+}
+
 async function loadWeather(){
   try{
-    const url = 'https://api.open-meteo.com/v1/forecast?latitude=59.437&longitude=24.7536&current=temperature_2m,weather_code,wind_speed_10m&timezone=Europe/Tallinn';
-    const res = await fetch(url, { cache: 'no-store' });
-    if(!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    const c = data.current;
-    if(!c) throw new Error('нет данных');
-    const desc = weatherCodeToText(c.weather_code);
-    const temp = Math.round(c.temperature_2m);
-    const wind = Math.round(c.wind_speed_10m);
+    allNews.weather = [await loadWeatherOpenMeteo()];
+    return;
+  }catch(e){
+    console.warn('Open-Meteo не сработал:', e.message);
+  }
+  try{
+    allNews.weather = [await loadWeatherWttr()];
+  }catch(e){
+    console.warn('wttr.in не сработал:', e.message);
     allNews.weather = [{
-      title: 'Погода в Таллинне: ' + desc + ', ' + temp + '°C',
-      desc: 'Ветер ' + wind + ' м/с.',
-      source: 'Open-Meteo',
+      title: 'Погода недоступна',
+      desc: 'Не удалось загрузить данные ни из Open-Meteo, ни из wttr.in.',
+      source: '—',
       side: 'ee'
     }];
-  }catch(e){
-    console.warn('Погода не загрузилась', e);
-    allNews.weather = [];
   }
 }
 
@@ -374,13 +419,12 @@ function splitIntoSentences(text){
   return text.match(/[^.!?]+[.!?]*/g) || [text];
 }
 
-/* Читает текст по предложениям. token защищает от двойного запуска. */
 function speakSentences(text, token, onDone){
   const sentences = splitIntoSentences(text);
   let index = 0;
 
   function speakNext(){
-    if(token !== currentSpeechToken) return; // устаревший запуск
+    if(token !== currentSpeechToken) return;
     if(!isSpeaking) return;
     if(index >= sentences.length){
       if(onDone) onDone();
@@ -451,53 +495,69 @@ async function speakItem(title, desc, source){
 
 function buildBroadcastText(){
   const parts = [];
+  const used = new Set();
   const duration = Number(document.getElementById('durationSelect').value) || 10;
 
+  function addNews(n, prefix){
+    const key = String(n.title || '').toLowerCase().replace(/[^a-zа-яё0-9]/gi, '');
+    if(!key || used.has(key)) return false;
+    used.add(key);
+    parts.push((prefix || '') + n.title + '. ' + (n.desc || ''));
+    return true;
+  }
+
+  // 1. Украина: 3 РФ, 1 Украина
   if(allNews.ukraine.length){
     parts.push('Блок первый. Украина. Сравнение источников.');
-    const ru = allNews.ukraine.filter(n => n.side === 'ru').slice(0, 2);
-    const ua = allNews.ukraine.filter(n => n.side === 'ua').slice(0, 2);
-    const world = allNews.ukraine.filter(n => n.side === 'world').slice(0, 1);
-
-    ru.forEach(n => {
-      parts.push('По версии ' + n.source + '. ' + n.title + '. ' + (n.desc || ''));
-    });
-    ua.forEach(n => {
-      parts.push('По версии ' + n.source + '. ' + n.title + '. ' + (n.desc || ''));
-    });
-    world.forEach(n => {
-      parts.push('Международный источник ' + n.source + '. ' + n.title + '. ' + (n.desc || ''));
-    });
+    const ru = allNews.ukraine.filter(n => n.side === 'ru').slice(0, 3);
+    const ua = allNews.ukraine.filter(n => n.side === 'ua').slice(0, 1);
+    ru.forEach(n => addNews(n, 'По версии ' + n.source + '. '));
+    ua.forEach(n => addNews(n, 'По версии ' + n.source + '. '));
   }
 
+  // 2. Мир (без Украины)
   if(allNews.world.length){
     parts.push('Переходим к мировым событиям.');
-    allNews.world.slice(0, duration >= 10 ? 4 : 2).forEach(n => {
-      parts.push(n.source + '. ' + n.title + '. ' + (n.desc || ''));
-    });
+    const limit = duration >= 10 ? 4 : 2;
+    let count = 0;
+    for(const n of allNews.world){
+      if(count >= limit) break;
+      if(addNews(n, n.source + '. ')) count++;
+    }
   }
 
+  // 3. Катаклизмы
   if(allNews.disasters.length){
     parts.push('Катаклизмы и катастрофы.');
-    allNews.disasters.slice(0, 3).forEach(n => {
-      parts.push(n.title + '. ' + (n.desc || ''));
-    });
+    let count = 0;
+    for(const n of allNews.disasters){
+      if(count >= 3) break;
+      if(addNews(n, '')) count++;
+    }
   }
 
+  // 4. Прочее
   if(allNews.misc.length){
     parts.push('Спорт, космос, медицина, наука, технологии и культура.');
-    allNews.misc.slice(0, duration >= 15 ? 5 : 3).forEach(n => {
-      parts.push(n.title + '. ' + (n.desc || ''));
-    });
+    const limit = duration >= 15 ? 5 : 3;
+    let count = 0;
+    for(const n of allNews.misc){
+      if(count >= limit) break;
+      if(addNews(n, n.source + '. ')) count++;
+    }
   }
 
+  // 5. Эстония
   if(allNews.estonia.length){
     parts.push('Эстония. Политика и экономика.');
-    allNews.estonia.slice(0, 3).forEach(n => {
-      parts.push(n.source + '. ' + n.title + '. ' + (n.desc || ''));
-    });
+    let count = 0;
+    for(const n of allNews.estonia){
+      if(count >= 3) break;
+      if(addNews(n, n.source + '. ')) count++;
+    }
   }
 
+  // 6. Погода
   if(allNews.weather.length){
     parts.push('Погода.');
     allNews.weather.slice(0, 1).forEach(n => {
